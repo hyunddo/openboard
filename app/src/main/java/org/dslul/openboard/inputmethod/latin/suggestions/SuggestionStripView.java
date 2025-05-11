@@ -23,6 +23,7 @@ import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -76,6 +77,8 @@ import retrofit2.converter.gson.GsonConverterFactory;
 
 public final class SuggestionStripView extends RelativeLayout implements OnClickListener,
         OnLongClickListener {
+    private static final String TAG = "IME_SEARCH/SSV";
+
     public interface Listener {
         void pickSuggestionManually(SuggestedWordInfo word);
 
@@ -96,12 +99,12 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
 
     // 뷰 바인딩
-    private final ImageButton    mSearchKey;        // 돋보기 아이콘
-    private final LinearLayout   mSuggestionsStrip; // 기존 추천 텍스트 스트립
-    private final LinearLayout   mInputContainer;   // 검색 입력창 + 전송 버튼 컨테이너
-    private final EditText       mSearchInput;      // 검색어 입력 EditText
-    private final ImageButton    mSendKey;          // 전송 버튼
-    private ViewGroup      mButtonsContainer; // 검색/음성 버튼 등 원래 버튼들
+    private final ImageButton mSearchKey;        // 돋보기 아이콘
+    private final LinearLayout mSuggestionsStrip; // 기존 추천 텍스트 스트립
+    private final LinearLayout mInputContainer;   // 검색 입력창 + 전송 버튼 컨테이너
+    private final EditText mSearchInput;      // 검색어 입력 EditText
+    private final ImageButton mSendKey;          // 전송 버튼
+    private ViewGroup mButtonsContainer; // 검색/음성 버튼 등 원래 버튼들
 
     MainKeyboardView mMainKeyboardView;
 
@@ -149,6 +152,37 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
 
     }
 
+    // ① 현재 검색 모드인지 외부에서 확인
+    public boolean isSearchMode() {
+        return mIsSearchMode;
+    }
+
+    // ② 검색창 EditText를 넘겨주거나, 편의 메서드를 만든다
+    public EditText getSearchInput() {
+        return mSearchInput;
+    }
+
+    // 선택) 편의 메서드
+    public void appendToSearch(char c) {
+        Log.d(TAG, "appendToSearch('" + c + "')");
+        mSearchInput.append(String.valueOf(c));
+    }
+
+    public void deleteLast() {
+        Editable e = mSearchInput.getText();
+        Log.d(TAG, "deleteLast()  beforeLen=" + e.length());
+        if (e.length() > 0) e.delete(e.length() - 1, e.length());
+    }
+
+    public void submitSearch() {
+        final String q = mSearchInput.getText().toString().trim();
+        Log.d(TAG, "submitSearch()  query=\"" + q + "\"");
+        if (!TextUtils.isEmpty(q)) {
+            doSearch(q);          // 이미 있는 메서드
+            exitSearchMode();     // 이미 있는 메서드
+        }
+    }
+
     /**
      * Construct a {@link SuggestionStripView} for showing suggestions to be picked by the user.
      *
@@ -160,28 +194,58 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
 //        mSendKey.setOnClickListener(v -> doSearch());
     }
 
-    /** 검색 모드 진입 */
+    /**
+     * 검색 모드 진입
+     */
     private void enterSearchMode() {
+        Log.w("IME_SEARCH/SSV", "★ enterSearchMode CALLED ★");
+        Log.d(TAG, "enterSearchMode()");
+        // 1) 플래그를 **가장 먼저** 켜 둔다
+        mIsSearchMode = true;
+
+        // 2) 혹시 모를 외부 호출로 strip 이 가려지지 않도록 강제 노출
+        setVisibility(VISIBLE);
+
+        // 3) 일반 화면 전환
         mSuggestionsStrip.setVisibility(GONE);
-        mButtonsContainer.setVisibility(GONE);
+        mSearchKey.setVisibility(GONE);
+        mVoiceKey.setVisibility(GONE);
         mInputContainer.setVisibility(VISIBLE);
+
+        /* ▼ 추가: 검색창을 맨 위로 올림 */
+        mInputContainer.bringToFront();
+        // bringToFront() 후 레이아웃/그리기 다시 시키기
+        requestLayout();
+        invalidate();
+
         mSearchInput.setText("");
         mSearchInput.requestFocus();
         InputMethodManager imm = (InputMethodManager)
                 getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-        imm.showSoftInput(mSearchInput, 0);
-        mIsSearchMode = true;
+        imm.showSoftInput(mSearchInput, InputMethodManager.SHOW_IMPLICIT);
+
+        dumpVis(">> enterSearchMode END");
     }
 
-    /** 검색 모드 종료 */
+    /**
+     * 검색 모드 종료
+     */
     private void exitSearchMode() {
-        mInputContainer.setVisibility(GONE);
-        mButtonsContainer.setVisibility(VISIBLE);
-        mSuggestionsStrip.setVisibility(VISIBLE);
+        Log.d(TAG, "exitSearchMode()  text=\"" + mSearchInput.getText() + "\"");
+        // 1) 먼저 플래그 해제
         mIsSearchMode = false;
+
+        // 2) 화면 복구
+        mInputContainer.setVisibility(GONE);
+        mSearchKey.setVisibility(VISIBLE);
+        mVoiceKey.setVisibility(VISIBLE);
+        mSuggestionsStrip.setVisibility(VISIBLE);
+
+        dumpVis(">> exitSearchMode END");
     }
 
     private void doSearch(final String query) {
+        Log.d(TAG, "doSearch()  query=\"" + query + "\"");
         ragApi.search("36648ad3-ed4b-4eb0-bcf1-1dc66fa5d258", query).enqueue(new Callback<RagSearchResponse>() {
             @Override
             public void onResponse(Call<RagSearchResponse> call,
@@ -191,6 +255,7 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
                 if (!resp.isSuccessful() || resp.body() == null) return;
                 uiHandler.post(() -> showRagResults(resp.body()));
             }
+
             @Override
             public void onFailure(Call<RagSearchResponse> call, Throwable t) {
                 uiHandler.post(() ->
@@ -200,7 +265,9 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
         });
     }
 
-    /** 받은 결과를 추천 스트립에 뿌리기 */
+    /**
+     * 받은 결과를 추천 스트립에 뿌리기
+     */
     private void showRagResults(RagSearchResponse res) {
         mSuggestionsStrip.removeAllViews();
 
@@ -241,7 +308,9 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
         mSuggestionsStrip.setVisibility(VISIBLE);
     }
 
-    /** LatinIME 쪽 리스너 getter (기존 코드에서 mListener) */
+    /**
+     * LatinIME 쪽 리스너 getter (기존 코드에서 mListener)
+     */
     private MoreSuggestionsView.MoreSuggestionsListener getListener() {
         // 여기에 실제 mListener 반환 로직을 넣으세요
         return (MoreSuggestionsView.MoreSuggestionsListener) mListener;
@@ -253,13 +322,15 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
         super(context, attrs, defStyle);
         inflate(context, R.layout.suggestions_strip, this);
 
+        Log.i(TAG, "CTOR  this=" + this.hashCode() + " searchKey=" + R.id.suggestions_strip_search_key);
+
         // 여기로 전부 집중시킵니다:
         // 1) 뷰 바인딩
-        mSearchKey        = findViewById(R.id.suggestions_strip_search_key);
+        mSearchKey = findViewById(R.id.suggestions_strip_search_key);
         mSuggestionsStrip = findViewById(R.id.suggestions_strip);
-        mInputContainer   = findViewById(R.id.suggestions_strip_input_container);
-        mSearchInput      = findViewById(R.id.suggestions_strip_search_input);
-        mSendKey          = findViewById(R.id.suggestions_strip_send_key);
+        mInputContainer = findViewById(R.id.suggestions_strip_input_container);
+        mSearchInput = findViewById(R.id.suggestions_strip_search_input);
+        mSendKey = findViewById(R.id.suggestions_strip_send_key);
         mButtonsContainer = findViewById(R.id.suggestions_strip_wrapper);
 
         // 2) Retrofit/OkHttp 초기화
@@ -275,18 +346,25 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
                 .build();
         ragApi = retrofit.create(RagApiService.class);
 
-        // 3) 리스너 설정
-        mSearchKey.setOnClickListener(v -> enterSearchMode());
-        mSendKey.setOnClickListener(v -> {
-            String q = mSearchInput.getText().toString().trim();
-            if (!q.isEmpty()) {
-                doSearch(q);
+        // 3) 리스너 설정 --------------------------------------------------
+        mSearchKey.setOnClickListener(v -> {
+            if (mIsSearchMode) {      // 검색 모드였다면 끄기
+                Log.i(TAG, "searchKey CLICK  (view.id=" + v.getId() + ")");
                 exitSearchMode();
+            } else {                  // 아니면 켜기
+                enterSearchMode();
             }
         });
 
+        mSendKey.setOnClickListener(v -> {
+            String q = mSearchInput.getText().toString().trim();
+            if (!q.isEmpty()) {
+                doSearch(q);          // 검색 실행
+            }
+            exitSearchMode();         // 입력칸 닫기
+        });
+
         final LayoutInflater inflater = LayoutInflater.from(context);
-        inflater.inflate(R.layout.suggestions_strip, this);
 
         mVoiceKey = findViewById(R.id.suggestions_strip_voice_key);
         mStripVisibilityGroup = new StripVisibilityGroup(this, mSuggestionsStrip);
@@ -327,41 +405,6 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
         keyboardAttr.recycle();
         mVoiceKey.setImageDrawable(iconVoice);
         mVoiceKey.setOnClickListener(this);
-
-        // 🔍 버튼 클릭: 인텐트 제거, 토글만
-        mSearchKey.setOnClickListener(v -> {
-            if (mInputContainer.getVisibility() == VISIBLE) {
-                mInputContainer.setVisibility(GONE);
-            } else {
-                mInputContainer.setVisibility(VISIBLE);
-                mSearchInput.requestFocus();
-                InputMethodManager imm = (InputMethodManager)
-                        context.getSystemService(Context.INPUT_METHOD_SERVICE);
-                imm.showSoftInput(mSearchInput, InputMethodManager.SHOW_IMPLICIT);
-            }
-        });
-
-        // 전송 버튼 클릭: 그냥 입력 초기화 & 숨기기
-        mSendKey.setOnClickListener(v -> {
-            // 1) 입력창 닫기
-            mInputContainer.setVisibility(GONE);
-            // … (키보드 닫기 등) …
-
-            // 2) 바로 팝업 띄우기 (CODE_MY_POPUP 으로 LatinIME 에 안 넘깁니다)
-            View popup = LayoutInflater.from(getContext())
-                    .inflate(R.layout.my_custom_popup, null);
-            // (Popup 레이아웃 초기화)
-
-            // IME 서비스에 붙이기
-            if (mListener != null) {
-                mListener.onCodeInput(
-                        Constants.CODE_MY_POPUP,
-                        Constants.SUGGESTION_STRIP_COORDINATE,
-                        Constants.SUGGESTION_STRIP_COORDINATE,
-                        false
-                );
-            }
-        });
     }
 
     private void showRagResults(List<String> results) {
@@ -396,13 +439,25 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
     }
 
     public void updateVisibility(final boolean shouldBeVisible, final boolean isFullscreenMode) {
+
+        dumpVis("-- updateVisibility IN  should=" + shouldBeVisible
+                + " fs=" + isFullscreenMode + " search=" + mIsSearchMode);
+
+        if (mIsSearchMode) {          // ← 검색 모드일 땐 strip 전체를
+            return;                   //    건드리지 않는다
+        }
+
         final int visibility = shouldBeVisible ? VISIBLE : (isFullscreenMode ? GONE : INVISIBLE);
         setVisibility(visibility);
+
+        dumpVis("-- updateVisibility OUT");
+
         final SettingsValues currentSettingsValues = Settings.getInstance().getCurrent();
         mVoiceKey.setVisibility(currentSettingsValues.mShowsVoiceInputKey ? VISIBLE : GONE);
     }
 
     public void setSuggestions(final SuggestedWords suggestedWords, final boolean isRtlLanguage) {
+        if (mIsSearchMode) return;    // ← 검색 모드에서는 후보 갱신 금지
         clear();
         mStripVisibilityGroup.setLayoutDirection(isRtlLanguage);
         mSuggestedWords = suggestedWords;
@@ -416,6 +471,7 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
     }
 
     public void clear() {
+        if (mIsSearchMode) return;    // ← 검색 모드에서 strip 초기화 금지
         mSuggestionsStrip.removeAllViews();
         removeAllDebugInfoViews();
         mStripVisibilityGroup.showSuggestionsStrip();
@@ -655,5 +711,31 @@ public final class SuggestionStripView extends RelativeLayout implements OnClick
     protected void onSizeChanged(final int w, final int h, final int oldw, final int oldh) {
         // Called by the framework when the size is known. Show the important notice if applicable.
         // This may be overriden by showing suggestions later, if applicable.
+    }
+
+    /**
+     * 현재 뷰들의 visibility를 한 줄로 덤프해 준다 (D 레벨)
+     */
+    private void dumpVis(String where) {
+        Log.d(TAG, String.format(
+                "%s  [Strip=%s  Input=%s  Buttons=%s] this=%s",
+                where,
+                visToStr(getVisibility()),
+                visToStr(mInputContainer.getVisibility()),
+                visToStr(mButtonsContainer.getVisibility()),
+                this.hashCode()));
+    }
+
+    private static String visToStr(int v) {
+        switch (v) {
+            case VISIBLE:
+                return "V";
+            case INVISIBLE:
+                return "I";
+            case GONE:
+                return "G";
+            default:
+                return String.valueOf(v);
+        }
     }
 }

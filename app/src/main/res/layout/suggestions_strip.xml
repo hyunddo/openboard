@@ -57,8 +57,7 @@
             android:soundEffectsEnabled="false" />
         <LinearLayout
             android:id="@+id/suggestions_strip_input_container"
-            android:layout_width="0dp"
-            android:layout_weight="1"
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="horizontal"
             android:gravity="center_vertical"
@@ -69,11 +68,18 @@
             <EditText
                 android:id="@+id/suggestions_strip_search_input"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
+
                 android:hint="@string/search_hint"
-                android:singleLine="true"
-                android:imeOptions="actionSend"/>
+
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:cursorVisible="true"
+                android:inputType="text"
+                android:maxLines="1"
+                android:imeOptions="actionSearch|flagNoExtractUi"
+                />
 
             <ImageButton
                 android:id="@+id/suggestions_strip_send_key"

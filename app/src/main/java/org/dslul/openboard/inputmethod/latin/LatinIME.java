@@ -119,6 +119,7 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
         DictionaryFacilitator.DictionaryInitializationListener,
         PermissionsManager.PermissionsResultCallback,
         KeyboardView.OnKeyboardActionListener {
+    private static final String TAG_SEARCH = "IME_SEARCH/IME";
     static final String TAG = LatinIME.class.getSimpleName();
     private static final boolean TRACE = false;
 
@@ -865,8 +866,7 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
 
     @Override
     public void onKey(int primaryCode, int[] keyCodes) {
-        Log.d("LatinIME", "[onKey] primaryCode=" + primaryCode
-                + " searchMode=" + mIsSearchMode);
+        Log.d(TAG_SEARCH, "onKey() primaryCode=" + primaryCode + "  mIsSearchMode=" + mIsSearchMode);
         // 1) 검색 모드 중일 때: 키를 EditText로 직접 보내기
         if (mIsSearchMode) {
             // 삭제키
@@ -903,8 +903,6 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
         // 3) 그 외 일반 키는 원래대로 처리
         handleCharacter(primaryCode, keyCodes);
     }
-
-
 
     @Override public void onPress(int primaryCode) { /* 필요 시 효과 추가 */ }
     @Override public void onRelease(int primaryCode) { /* 필요 시 효과 추가 */ }
@@ -943,8 +941,6 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
         }
     }
 
-
-
     @Override
     public void setInputView(final View view) {
         super.setInputView(view);
@@ -952,6 +948,7 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
         mInsetsUpdater = ViewOutlineProviderCompatUtils.setInsetsOutlineProvider(view);
         updateSoftInputWindowLayoutParameters();
         mSuggestionStripView = view.findViewById(R.id.suggestion_strip_view);
+        Log.d(TAG_SEARCH, "setInputView()  strip=" + (mSuggestionStripView != null));
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setListener(this, view);
         }
@@ -1589,59 +1586,41 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
     @Override
     public void onCodeInput(final int codePoint, final int x, final int y,
                             final boolean isKeyRepeat) {
-        // ── A. 검색 모드(팝업) 중인 경우: 키 입력을 EditText로 라우팅 ──
-        if (mIsSearchMode) {
-            // 1) 삭제
-            if (codePoint == Constants.CODE_DELETE) {
-                Editable edt = mSearchInput.getText();
-                if (edt.length() > 0) {
-                    edt.delete(edt.length() - 1, edt.length());
-                }
-            }
-            // 2) 전송(엔터)
-            else if (codePoint == Constants.CODE_ENTER) {
-                // 최종 검색 실행
-                String query = mSearchInput.getText().toString();
-                performSearch(query);
-                closeMyPopup();
-                mIsSearchMode = false;
-            }
-            // 3) 일반 문자
-            else {
-                char c = (char) codePoint;
-                mSearchInput.append(String.valueOf(c));
-            }
-            return;  // 여기서 빠지면 기본 입력 로직은 실행되지 않습니다
-        }
-        // ── B. 검색 버튼 눌러 팝업 띄우기 ──
-        if (codePoint == CODE_MY_POPUP) {
-            // 팝업 뷰 inflate & 붙이기
-            if (mPopupHost.getChildCount() == 0) {
-                View popup = getLayoutInflater()
-                        .inflate(R.layout.my_custom_popup, mPopupHost, false);
-                mPopupHost.addView(popup);
-            }
-            // 키보드 숨기고 팝업만 보이게
-            mInputView.findViewById(R.id.main_keyboard_frame)
-                    .setVisibility(View.GONE);
-            mPopupHost.setVisibility(View.VISIBLE);
+        Log.d(TAG_SEARCH, "onCodeInput() code=" + codePoint
+                + "  searchMode=" + (mSuggestionStripView!=null && mSuggestionStripView.isSearchMode()));
 
-            // 검색 모드 시작
-            mIsSearchMode = true;
-            // 초기화
-            mSearchInput.setText("");
-            mSearchInput.requestFocus();
-            // 가상 키보드 띄우기
-            InputMethodManager imm = (InputMethodManager)
-                    getSystemService(INPUT_METHOD_SERVICE);
-            imm.showSoftInput(mSearchInput, 0);
+        Log.d("IME_SEARCH/IME", "onCodeInput  cp=" + codePoint +
+                "  isSearch=" + (mSuggestionStripView != null &&
+                mSuggestionStripView.isSearchMode()));
+
+        // ── A.  검색 모드인지 확인 ─────────────────────────────
+        if (mSuggestionStripView != null && mSuggestionStripView.isSearchMode()) {
+            // 삭제
+            if (codePoint == Constants.CODE_DELETE) {
+                mSuggestionStripView.deleteLast();
+            }
+            // 엔터(전송)
+            else if (codePoint == Constants.CODE_ENTER) {
+                mSuggestionStripView.submitSearch();
+            }
+            // 일반 문자
+            else if (codePoint > 0 && Character.isDefined(codePoint)) {
+                mSuggestionStripView.appendToSearch((char) codePoint);
+            }
+            return;     // 호스트 앱으로는 아무 것도 보내지 않음
+        }
+
+        // ── B.  (선택) 🔍 아이콘 전용 키코드 처리 ───────────
+        if (codePoint == CODE_MY_POPUP) {
+            // SuggestionStripView 내부의 setOnClickListener 로 처리 중이면
+            // 여기는 건너뛰어도 된다.  필요 없다면 삭제 가능
             return;
         }
 
-        // ── C. 그 외 일반 키 입력 처리 ──
-        final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
-        final int keyX = mainKeyboardView.getKeyX(x);
-        final int keyY = mainKeyboardView.getKeyY(y);
+        // ── C.  평상시 IME 기본 로직 ────────────────────────
+        final MainKeyboardView kv = mKeyboardSwitcher.getMainKeyboardView();
+        final int keyX = kv.getKeyX(x);
+        final int keyY = kv.getKeyY(y);
         final Event event = createSoftwareKeypressEvent(
                 getCodePointForKeyboard(codePoint), keyX, keyY, isKeyRepeat);
         onEvent(event);
