@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 종이비행기 모양 전송 아이콘 -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M2,21l21,-9L2,3v7l15,2l-15,2v7z"/>
+</vector>

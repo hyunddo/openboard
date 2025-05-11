@@ -3,12 +3,12 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
 android {
-    compileSdkVersion 31
+    compileSdk 33
 
     defaultConfig {
         applicationId "org.dslul.openboard.inputmethod.latin"
-        minSdkVersion 19
-        targetSdkVersion 31
+        minSdkVersion 21
+        targetSdkVersion 33
         versionCode 19
         versionName '1.4.5'
     }
@@ -47,6 +47,13 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.7.0'
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
     implementation 'androidx.viewpager2:viewpager2:1.0.0'
+
+    // Retrofit 본체
+    implementation "com.squareup.retrofit2:retrofit:2.9.0"
+    // Form-urlencoding 지원
+    implementation "com.squareup.retrofit2:converter-gson:2.9.0"
+    // OkHttp (Retrofit 내부에서 사용)
+    implementation "com.squareup.okhttp3:okhttp:4.10.0"
 }
 repositories {
     mavenCentral()

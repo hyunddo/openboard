@@ -36,6 +36,7 @@ import org.dslul.openboard.inputmethod.latin.suggestions.MoreSuggestions.MoreSug
 public final class MoreSuggestionsView extends MoreKeysKeyboardView {
     private static final String TAG = MoreSuggestionsView.class.getSimpleName();
 
+
     public static abstract class MoreSuggestionsListener extends KeyboardActionListener.Adapter {
         public abstract void onSuggestionSelected(final SuggestedWordInfo info);
     }

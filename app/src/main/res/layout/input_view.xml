@@ -20,9 +20,16 @@
 
 <org.dslul.openboard.inputmethod.latin.InputView
     xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_input_view"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     style="?attr/inputViewStyle">
+    <!-- ① 여기에 커스텀 팝업을 붙일 빈 컨테이너 -->
+    <FrameLayout
+        android:id="@+id/my_popup_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
     <include
         android:id="@+id/main_keyboard_frame"
         layout="@layout/main_keyboard_frame" />

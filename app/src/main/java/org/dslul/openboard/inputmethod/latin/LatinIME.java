@@ -27,12 +27,14 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.inputmethodservice.InputMethodService;
+import android.inputmethodservice.KeyboardView;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.Debug;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.Process;
+import android.text.Editable;
 import android.text.InputType;
 import android.util.Log;
 import android.util.PrintWriterPrinter;
@@ -46,7 +48,12 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.CompletionInfo;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 
 import org.dslul.openboard.inputmethod.accessibility.AccessibilityUtils;
 import org.dslul.openboard.inputmethod.annotations.UsedForTesting;
@@ -110,7 +117,8 @@ import static org.dslul.openboard.inputmethod.latin.common.Constants.ImeOption.N
 public class LatinIME extends InputMethodService implements KeyboardActionListener,
         SuggestionStripView.Listener, SuggestionStripViewAccessor,
         DictionaryFacilitator.DictionaryInitializationListener,
-        PermissionsManager.PermissionsResultCallback {
+        PermissionsManager.PermissionsResultCallback,
+        KeyboardView.OnKeyboardActionListener {
     static final String TAG = LatinIME.class.getSimpleName();
     private static final boolean TRACE = false;
 
@@ -152,6 +160,15 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
     private View mInputView;
     private InsetsUpdater mInsetsUpdater;
     private SuggestionStripView mSuggestionStripView;
+
+    private static final int CODE_MY_POPUP = /* 여러분이 정의한 */ 9000;
+
+    private FrameLayout mPopupHost;
+    private EditText mSearchInput;
+    private boolean mIsSearchMode = false;
+
+    private LinearLayout mInputContainer; // suggestions_strip_input_container
+
 
     private RichInputMethodManager mRichImm;
     @UsedForTesting final KeyboardSwitcher mKeyboardSwitcher;
@@ -822,8 +839,111 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
     @Override
     public View onCreateInputView() {
         StatsUtils.onCreateInputView();
-        return mKeyboardSwitcher.onCreateInputView(mIsHardwareAcceleratedDrawingEnabled);
+
+        View inputView = mKeyboardSwitcher.onCreateInputView(
+                mIsHardwareAcceleratedDrawingEnabled);
+
+        // ① SuggestionStripView 의 ID 로 뷰를 찾는다.
+        SuggestionStripView strip = inputView.findViewById(R.id.suggestion_strip_view);
+
+        // ② 그 안의 검색 컨테이너와 EditText 바인딩
+        mInputContainer = strip.findViewById(R.id.suggestions_strip_input_container);
+        mSearchInput    = strip.findViewById(R.id.suggestions_strip_search_input);
+
+        // ③ 키보드 뷰에 키 리스너 연결
+        MainKeyboardView kv;
+        if (inputView instanceof MainKeyboardView) {
+            kv = (MainKeyboardView) inputView;
+        } else {
+            kv = inputView.findViewById(R.id.keyboard_view);
+        }
+        kv.setKeyboardActionListener(this);
+
+        return inputView;
     }
+
+
+    @Override
+    public void onKey(int primaryCode, int[] keyCodes) {
+        Log.d("LatinIME", "[onKey] primaryCode=" + primaryCode
+                + " searchMode=" + mIsSearchMode);
+        // 1) 검색 모드 중일 때: 키를 EditText로 직접 보내기
+        if (mIsSearchMode) {
+            // 삭제키
+            if (primaryCode == Constants.CODE_DELETE) {
+                Editable edt = mSearchInput.getText();
+                if (edt.length() > 0) {
+                    edt.delete(edt.length() - 1, edt.length());
+                }
+            }
+            // 엔터(전송)
+            else if (primaryCode == Constants.CODE_ENTER) {
+                String query = mSearchInput.getText().toString();
+                performSearch(query);    // doSearch() 같은 메소드
+                closeMyPopup();          // 팝업 숨기고 키보드 복귀
+                mIsSearchMode = false;
+            }
+            // 일반 문자
+            else {
+                char c = (char) primaryCode;
+                mSearchInput.append(String.valueOf(c));
+            }
+            return;  // 기본 handleCharacter로 넘어가지 않도록
+        }
+
+        // 2) 검색 버튼(-100)을 눌렀을 때: 검색 모드로 진입
+        if (primaryCode == -100 /* 또는 Constants.CODE_MY_POPUP */) {
+            showSearchInput();
+            mPopupHost.setVisibility(View.VISIBLE);
+            mInputContainer.setVisibility(View.VISIBLE);
+            mIsSearchMode = true;
+            return;
+        }
+
+        // 3) 그 외 일반 키는 원래대로 처리
+        handleCharacter(primaryCode, keyCodes);
+    }
+
+
+
+    @Override public void onPress(int primaryCode) { /* 필요 시 효과 추가 */ }
+    @Override public void onRelease(int primaryCode) { /* 필요 시 효과 추가 */ }
+    @Override public void onText(CharSequence text) { /* … */ }
+    @Override public void swipeLeft() { /* … */ }
+    @Override public void swipeRight() { /* … */ }
+    @Override public void swipeUp() { /* … */ }
+    @Override public void swipeDown() { /* … */ }
+
+    private void showSearchInput() {
+        // 스트립 숨기기
+        mInputView.findViewById(R.id.suggestion_strip_view)
+                .setVisibility(View.GONE);
+        // 팝업 보이기
+        mPopupHost.setVisibility(View.VISIBLE);
+        mIsSearchMode = true;
+    }
+
+    /** 일반 키 입력 처리 (예시) */
+    private void handleCharacter(int primaryCode, int[] keyCodes) {
+        // 기존에 LatinIME가 키를 처리하던 로직이 있다면 호출
+        // 예: mKeyboardSwitcher.handleCharacter(primaryCode, keyCodes);
+        // 없으면 IME 기본 입력 호출
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null) {
+            ic.commitText(String.valueOf((char) primaryCode), 1);
+        }
+    }
+
+    /** 검색 결과를 자판에 입력해 주는 예시 */
+    private void performSearch(String query) {
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null) {
+            // 검색어 전체를 한 번에 입력
+            ic.commitText(query, 1);
+        }
+    }
+
+
 
     @Override
     public void setInputView(final View view) {
@@ -1397,7 +1517,7 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
         // for RTL languages we want to invert pointer movement
         if (mRichImm.getCurrentSubtype().isRtlSubtype())
             steps = -steps;
-            
+
         mInputLogic.finishInput();
         if (steps < 0) {
             int availableCharacters = mInputLogic.mConnection.getTextBeforeCursor(64, 0).length();
@@ -1469,18 +1589,68 @@ public class LatinIME extends InputMethodService implements KeyboardActionListen
     @Override
     public void onCodeInput(final int codePoint, final int x, final int y,
                             final boolean isKeyRepeat) {
-        // TODO: this processing does not belong inside LatinIME, the caller should be doing this.
+        // ── A. 검색 모드(팝업) 중인 경우: 키 입력을 EditText로 라우팅 ──
+        if (mIsSearchMode) {
+            // 1) 삭제
+            if (codePoint == Constants.CODE_DELETE) {
+                Editable edt = mSearchInput.getText();
+                if (edt.length() > 0) {
+                    edt.delete(edt.length() - 1, edt.length());
+                }
+            }
+            // 2) 전송(엔터)
+            else if (codePoint == Constants.CODE_ENTER) {
+                // 최종 검색 실행
+                String query = mSearchInput.getText().toString();
+                performSearch(query);
+                closeMyPopup();
+                mIsSearchMode = false;
+            }
+            // 3) 일반 문자
+            else {
+                char c = (char) codePoint;
+                mSearchInput.append(String.valueOf(c));
+            }
+            return;  // 여기서 빠지면 기본 입력 로직은 실행되지 않습니다
+        }
+        // ── B. 검색 버튼 눌러 팝업 띄우기 ──
+        if (codePoint == CODE_MY_POPUP) {
+            // 팝업 뷰 inflate & 붙이기
+            if (mPopupHost.getChildCount() == 0) {
+                View popup = getLayoutInflater()
+                        .inflate(R.layout.my_custom_popup, mPopupHost, false);
+                mPopupHost.addView(popup);
+            }
+            // 키보드 숨기고 팝업만 보이게
+            mInputView.findViewById(R.id.main_keyboard_frame)
+                    .setVisibility(View.GONE);
+            mPopupHost.setVisibility(View.VISIBLE);
+
+            // 검색 모드 시작
+            mIsSearchMode = true;
+            // 초기화
+            mSearchInput.setText("");
+            mSearchInput.requestFocus();
+            // 가상 키보드 띄우기
+            InputMethodManager imm = (InputMethodManager)
+                    getSystemService(INPUT_METHOD_SERVICE);
+            imm.showSoftInput(mSearchInput, 0);
+            return;
+        }
+
+        // ── C. 그 외 일반 키 입력 처리 ──
         final MainKeyboardView mainKeyboardView = mKeyboardSwitcher.getMainKeyboardView();
-        // x and y include some padding, but everything down the line (especially native
-        // code) needs the coordinates in the keyboard frame.
-        // TODO: We should reconsider which coordinate system should be used to represent
-        // keyboard event. Also we should pull this up -- LatinIME has no business doing
-        // this transformation, it should be done already before calling onEvent.
         final int keyX = mainKeyboardView.getKeyX(x);
         final int keyY = mainKeyboardView.getKeyY(y);
-        final Event event = createSoftwareKeypressEvent(getCodePointForKeyboard(codePoint),
-                keyX, keyY, isKeyRepeat);
+        final Event event = createSoftwareKeypressEvent(
+                getCodePointForKeyboard(codePoint), keyX, keyY, isKeyRepeat);
         onEvent(event);
+    }
+
+    private void closeMyPopup() {
+        mPopupHost.setVisibility(View.GONE);
+        mInputView.findViewById(R.id.main_keyboard_frame)
+                .setVisibility(View.VISIBLE);
     }
 
     // This method is public for testability of LatinIME, but also in the future it should
